@@ -1,0 +1,36 @@
+# ROS 2 / colcon build outputs
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Editor / OS junk
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local virtual environments
+.venv/
+venv/
+
+# Model weights / large files
+*.pt
+*.pth
+*.onnx
+*.engine
+
+# Temporary archives
+*.zip
+*.tar
+*.tar.gz
+
+# Misc
+*.log
