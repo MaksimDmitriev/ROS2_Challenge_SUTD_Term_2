@@ -3,13 +3,16 @@
 <package format="3">
   <name>my_vision_pkg</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Mission control and visualization package</description>
   <maintainer email="sutd@todo.todo">sutd</maintainer>
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
   <depend>visualization_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>nav2_msgs</depend>
+  <depend>action_msgs</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

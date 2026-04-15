@@ -15,16 +15,15 @@ setup(
     zip_safe=True,
     maintainer='sutd',
     maintainer_email='sutd@todo.todo',
-    description='TODO: Package description',
+    description='Mission and visualization package',
     license='TODO: License declaration',
     extras_require={
-        'test': [
-            'pytest',
-        ],
+        'test': ['pytest'],
     },
     entry_points={
         'console_scripts': [
             'visualizer_node = my_vision_pkg.object_visualizer:main',
+            'mission_node = my_vision_pkg.mission_node:main',
         ],
     },
-)
+)s
