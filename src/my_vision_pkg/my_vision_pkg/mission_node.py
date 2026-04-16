@@ -47,6 +47,9 @@ class MissionNode(Node):
 
     def vision_callback(self, msg: String) -> None:
         self.latest_vision_status = msg.data.strip().lower()
+        self.get_logger().info(
+            f"vision_callback at location {location['id']}: {status}"
+        )
 
     def go_to_next_location(self) -> None:
         if self.current_index >= len(self.candidate_locations):
@@ -135,6 +138,9 @@ class MissionNode(Node):
         for i, item in enumerate(self.detected_results):
             marker = Marker()
             marker.header.frame_id = 'map'
+            self.get_logger().info(
+                f"publish_all_markers: {status}"
+            )
             marker.header.stamp = self.get_clock().now().to_msg()
             marker.ns = 'detected_people'
             marker.id = i
@@ -167,6 +173,13 @@ class MissionNode(Node):
                 marker.color.a = 1.0
 
             marker_array.markers.append(marker)
+        self.get_logger().info(
+            f"[MARKER] id={result['id']} "
+            f"status={status} "
+            f"pos=({result['x']:.2f}, {result['y']:.2f}) "
+            f"color={'BLUE' if status=='authorized' else 'RED' if status=='intruder' else 'GRAY'}"
+        )
+
 
         self.marker_pub.publish(marker_array)
 
