@@ -63,9 +63,8 @@ class MissionNode(Node):
         goal_msg.pose.pose.position.x = location['x']
         goal_msg.pose.pose.position.y = location['y']
 
-        qz, qw = self.yaw_to_quaternion(location['yaw'])
-        goal_msg.pose.pose.orientation.z = qz
-        goal_msg.pose.pose.orientation.w = qw
+        goal_msg.pose.pose.orientation.z = location['z']
+        goal_msg.pose.pose.orientation.w = location['w']
 
         send_goal_future = self.nav_client.send_goal_async(
             goal_msg,
@@ -170,12 +169,6 @@ class MissionNode(Node):
             marker_array.markers.append(marker)
 
         self.marker_pub.publish(marker_array)
-
-    @staticmethod
-    def yaw_to_quaternion(yaw: float):
-        qz = math.sin(yaw / 2.0)
-        qw = math.cos(yaw / 2.0)
-        return qz, qw
 
 
 def main(args=None):
