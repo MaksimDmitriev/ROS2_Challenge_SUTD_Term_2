@@ -139,7 +139,7 @@ class MissionNode(Node):
             marker = Marker()
             marker.header.frame_id = 'map'
             self.get_logger().info(
-                f"publish_all_markers: {status}"
+                f"publish_all_markers: {item['status']}"
             )
             marker.header.stamp = self.get_clock().now().to_msg()
             marker.ns = 'detected_people'
@@ -173,12 +173,12 @@ class MissionNode(Node):
                 marker.color.a = 1.0
 
             marker_array.markers.append(marker)
-        self.get_logger().info(
-            f"[MARKER] id={result['id']} "
-            f"status={status} "
-            f"pos=({result['x']:.2f}, {result['y']:.2f}) "
-            f"color={'BLUE' if status=='authorized' else 'RED' if status=='intruder' else 'GRAY'}"
-        )
+            self.get_logger().info(
+                f"[MARKER] id={item['id']} "
+                f"status={item['status']} "
+                f"pos=({item['x']:.2f}, {item['y']:.2f}) "
+                f"color={'BLUE' if item['status']=='authorized' else 'RED' if item['status']=='intruder' else 'GRAY'}"
+            )
 
 
         self.marker_pub.publish(marker_array)
