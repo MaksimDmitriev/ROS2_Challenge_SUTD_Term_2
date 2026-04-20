@@ -48,7 +48,7 @@ class MissionNode(Node):
     def vision_callback(self, msg: String) -> None:
         self.latest_vision_status = msg.data.strip().lower()
         self.get_logger().info(
-            f"vision_callback at location {location['id']}: {status}"
+            f"vision_callback: {self.latest_vision_status}"
         )
 
     def go_to_next_location(self) -> None:
