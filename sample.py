@@ -1,60 +1,31 @@
 #!/usr/bin/env python3
-"""Local YOLO sanity-check runner (no ROS required).
-
-Runs a YOLO model on a local image file or directory and prints:
-- detected raw labels
-- mapped roles
-- final mission-style status
-"""
+"""Local GPT-vision sanity-check runner (no ROS required)."""
 
 from __future__ import annotations
 
 import argparse
+import base64
+import mimetypes
+import os
 from pathlib import Path
 from typing import Iterable
 
-from ultralytics import YOLO
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-
-ROLE_ALIASES = {
-    "military": {"military", "soldier", "officer", "military officer"},
-    "researcher": {"researcher", "scientist", "lab coat", "doctor"},
-    "student": {"student"},
-    "worker": {"worker", "construction worker"},
-}
-STOP_SIGN_ALIASES = {"stop sign", "stopsign"}
-
-
-def normalize_label(label: str) -> str:
-    return str(label).strip().lower().replace("_", " ").replace("-", " ")
-
-
-def map_label_to_role(label: str) -> str | None:
-    normalized = normalize_label(label)
-    for role, aliases in ROLE_ALIASES.items():
-        if normalized in aliases:
-            return role
-    return None
-
-
-def classify_labels(labels: list[str]) -> tuple[list[str], str]:
-    roles = []
-    for label in labels:
-        role = map_label_to_role(label)
-        if role is not None:
-            roles.append(role)
-
-    normalized_labels = [normalize_label(label) for label in labels]
-
-    if any(label in STOP_SIGN_ALIASES for label in normalized_labels):
-        return roles, "stop_sign"
-    if any(role in roles for role in ("military", "worker")):
-        return roles, "intruder"
-    if any(role in roles for role in ("researcher", "student")):
-        return roles, "authorized"
-    return roles, "empty"
+DEFAULT_PROMPT = (
+    "Classify this single scene image for security. "
+    "Rules: military or worker => intruder. "
+    "Student or researcher or lab assistant => authorized. "
+    "If no relevant person is visible => empty. "
+    "If a stop sign is clearly visible => stop_sign. "
+    "Return exactly one token: intruder, authorized, empty, or stop_sign."
+)
+VALID_STATUSES = {"intruder", "authorized", "empty", "stop_sign"}
 
 
 def iter_images(source: Path) -> Iterable[Path]:
@@ -68,72 +39,122 @@ def iter_images(source: Path) -> Iterable[Path]:
             yield path
 
 
-def extract_labels(result) -> list[str]:
-    boxes = result.boxes
-    if boxes is None or len(boxes) == 0:
-        return []
+def parse_status(text: str) -> str:
+    lowered = (text or "").strip().lower()
+    if "stop_sign" in lowered or "stop sign" in lowered:
+        return "stop_sign"
+    if "intruder" in lowered:
+        return "intruder"
+    if "authorized" in lowered:
+        return "authorized"
+    if "empty" in lowered:
+        return "empty"
+    return "empty"
 
-    names = result.names
-    labels = []
-    for cls_id in boxes.cls.tolist():
-        cls_id = int(cls_id)
-        if isinstance(names, dict):
-            label = str(names.get(cls_id, cls_id))
-        else:
-            label = str(names[cls_id]) if 0 <= cls_id < len(names) else str(cls_id)
-        labels.append(label)
-    return labels
+
+def image_to_data_url(image_path: Path) -> str:
+    mime, _ = mimetypes.guess_type(str(image_path))
+    if not mime:
+        mime = "image/jpeg"
+    raw = image_path.read_bytes()
+    b64 = base64.b64encode(raw).decode("utf-8")
+    return f"data:{mime};base64,{b64}"
+
+
+def classify_with_openai(client: OpenAI, model: str, prompt: str, image_path: Path) -> tuple[str, str]:
+    image_url = image_to_data_url(image_path)
+
+    try:
+        response = client.responses.create(
+            model=model,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        {"type": "input_image", "image_url": image_url},
+                    ],
+                }
+            ],
+            max_output_tokens=16,
+        )
+        raw_text = (getattr(response, "output_text", "") or "").strip()
+    except Exception:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                    ],
+                }
+            ],
+            max_tokens=16,
+        )
+        raw_text = (response.choices[0].message.content or "").strip()
+
+    return parse_status(raw_text), raw_text
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Local YOLO test runner for mission labels.")
-    parser.add_argument(
-        "--model",
-        default="src/yolo_detector/models/best.pt",
-        help="Path to model weights (.pt).",
-    )
+    parser = argparse.ArgumentParser(description="Local GPT vision test runner for mission labels.")
     parser.add_argument(
         "--source",
         default="dataset/images/val",
         help="Image file or directory to test.",
     )
     parser.add_argument(
-        "--conf",
-        type=float,
-        default=0.25,
-        help="Confidence threshold passed to YOLO.",
+        "--model",
+        default="gpt-4.1-mini",
+        help="OpenAI vision model name.",
+    )
+    parser.add_argument(
+        "--prompt",
+        default=DEFAULT_PROMPT,
+        help="Prompt used for classification.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Optional max number of images to evaluate (0 = no limit).",
     )
     args = parser.parse_args()
 
-    model_path = Path(args.model)
-    source_path = Path(args.source)
+    if OpenAI is None:
+        raise SystemExit("Missing dependency: install python package `openai`.")
 
-    if not model_path.exists():
-        raise SystemExit(f"Model not found: {model_path}")
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise SystemExit("OPENAI_API_KEY is not set.")
+
+    source_path = Path(args.source)
     if not source_path.exists():
         raise SystemExit(f"Source not found: {source_path}")
 
-    model = YOLO(str(model_path))
     images = list(iter_images(source_path))
+    if args.limit > 0:
+        images = images[:args.limit]
     if not images:
         raise SystemExit(f"No images found under: {source_path}")
 
-    print(f"Model:  {model_path}")
+    client = OpenAI(api_key=api_key)
+
+    print(f"Model:  {args.model}")
     print(f"Source: {source_path}")
     print("-" * 120)
-    print(f"{'image':50} | {'labels':35} | {'roles':20} | status")
+    print(f"{'image':45} | {'status':10} | raw_response")
     print("-" * 120)
 
     status_counts: dict[str, int] = {}
     for image_path in images:
-        results = model(str(image_path), conf=args.conf, verbose=False)
-        labels = extract_labels(results[0])
-        roles, status = classify_labels(labels)
-
+        status, raw_text = classify_with_openai(client, args.model, args.prompt, image_path)
+        if status not in VALID_STATUSES:
+            status = "empty"
         status_counts[status] = status_counts.get(status, 0) + 1
-        labels_text = ",".join(normalize_label(x) for x in labels) or "-"
-        roles_text = ",".join(roles) or "-"
-        print(f"{image_path.name[:50]:50} | {labels_text[:35]:35} | {roles_text[:20]:20} | {status}")
+        print(f"{image_path.name[:45]:45} | {status:10} | {raw_text[:55]}")
 
     print("-" * 120)
     print("Summary:", ", ".join(f"{k}={v}" for k, v in sorted(status_counts.items())))
