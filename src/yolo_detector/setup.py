@@ -15,7 +15,7 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
         (os.path.join('share', package_name, 'models'), glob('models/*')),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'openai'],
     zip_safe=True,
     maintainer='sutd',
     maintainer_email='sutd@todo.todo',
@@ -24,6 +24,7 @@ setup(
     entry_points={
         'console_scripts': [
             'yolo_detector = yolo_detector.yolo_node:main',
+            'gpt_vision_node = yolo_detector.gpt_vision_node:main',
         ],
     },
 )

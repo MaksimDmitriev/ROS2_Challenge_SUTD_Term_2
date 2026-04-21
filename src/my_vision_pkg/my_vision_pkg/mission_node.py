@@ -8,6 +8,7 @@ from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 from nav2_msgs.action import NavigateToPose
 from action_msgs.msg import GoalStatus
+from std_srvs.srv import Trigger
 
 
 class MissionNode(Node):
@@ -43,10 +44,15 @@ class MissionNode(Node):
             self.vision_callback,
             10
         )
+        self.vision_client = self.create_client(Trigger, '/classify_current_frame')
 
         self.get_logger().info('Waiting for navigate_to_pose action server...')
         self.nav_client.wait_for_server()
         self.get_logger().info('Connected to Nav2 action server.')
+        self.get_logger().info('Waiting for /classify_current_frame service...')
+        while not self.vision_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().warn('/classify_current_frame not available yet, waiting...')
+        self.get_logger().info('Connected to vision classification service.')
 
         self.go_to_next_location()
 
@@ -55,7 +61,7 @@ class MissionNode(Node):
         self.get_logger().info(
             f"vision_callback: {self.latest_vision_status}"
         )
-        if self.latest_vision_status == 'stop_sign':
+        if self.latest_vision_status == 'stop_sign' and self.current_goal_handle is not None:
             self.handle_stop_sign_event()
 
     def find_location_index_by_id(self, location_id: int):
@@ -177,29 +183,49 @@ class MissionNode(Node):
             self.go_to_next_location()
             return
 
-        self.get_logger().info('Goal reached. Waiting briefly before inspection...')
+        self.get_logger().info('Goal reached. Waiting 1 second before single-frame inspection...')
 
         if self.inspection_timer is not None:
             self.inspection_timer.cancel()
 
-        self.inspection_timer = self.create_timer(2.0, self.inspect_current_location_once)
+        self.inspection_timer = self.create_timer(1.0, self.inspect_current_location_once)
 
     def inspect_current_location_once(self):
         if self.inspection_timer is not None:
             self.inspection_timer.cancel()
             self.inspection_timer = None
 
-        location = self.candidate_locations[self.current_index]
-        status = self.latest_vision_status
+        if not self.vision_client.service_is_ready():
+            self.get_logger().warn('Vision service unavailable at inspection time. Marking empty.')
+            self.complete_inspection('empty')
+            return
 
-        if status not in ('authorized', 'intruder', 'empty'):
+        request = Trigger.Request()
+        future = self.vision_client.call_async(request)
+        future.add_done_callback(self.vision_result_callback)
+
+    def vision_result_callback(self, future):
+        status = 'empty'
+        try:
+            response = future.result()
+            candidate = response.message.strip().lower()
+            if candidate in ('authorized', 'intruder', 'empty', 'stop_sign'):
+                status = candidate
+        except Exception as e:
+            self.get_logger().error(f'Vision service call failed: {e}')
             status = 'empty'
 
+        self.latest_vision_status = status
+        self.complete_inspection(status)
+
+    def complete_inspection(self, status: str) -> None:
+        location = self.candidate_locations[self.current_index]
+        marker_status = status if status in ('authorized', 'intruder', 'empty') else 'empty'
         self.get_logger().info(
-            f"Inspection at location {location['id']}: {status}"
+            f"Inspection at location {location['id']}: {marker_status}"
         )
 
-        self.record_result(status)
+        self.record_result(marker_status)
         self.last_completed_location_id = location['id']
         self.publish_all_markers()
 
