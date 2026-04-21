@@ -10,7 +10,9 @@ def generate_launch_description():
             name='yolo_detector',
             output='screen',
             parameters=[
-                {'rate_limit': 1.0}
+                {'rate_limit': 1.0},
+                {'model_file': 'yolov8n.pt'},
+                {'target_roles': ['military', 'researcher', 'student', 'worker']}
             ],
             remappings=[
                 ('/image_input_topic', '/camera/image_raw'),

@@ -34,13 +34,79 @@ class YOLODetector(Node):
         self.detection_interval = 1.0 / rate_limit
         self.last_detection_time = 0.0
 
+        self.declare_parameter('model_file', 'yolov8n.pt')
+        model_file = self.get_parameter('model_file').get_parameter_value().string_value
+        if not model_file:
+            model_file = 'yolov8n.pt'
+
+        self.declare_parameter('target_roles', ['military', 'researcher', 'student', 'worker'])
+        configured_roles = [
+            role.strip().lower()
+            for role in self.get_parameter('target_roles').value
+            if isinstance(role, str) and role.strip()
+        ]
+        if not configured_roles:
+            configured_roles = ['military', 'researcher', 'student', 'worker']
+        self.target_roles = set(configured_roles)
+
+        self.role_aliases = {
+            'military': {'military', 'soldier', 'officer', 'military officer'},
+            'researcher': {'researcher', 'scientist', 'lab coat', 'doctor'},
+            'student': {'student'},
+            'worker': {'worker', 'construction worker'},
+        }
+        self.role_aliases = {
+            role: aliases
+            for role, aliases in self.role_aliases.items()
+            if role in self.target_roles
+        }
+
         pkg_dir = get_package_share_directory('yolo_detector')
-        model_path = os.path.join(pkg_dir, 'models', 'yolov8n.pt')
+        model_path = model_file
+        if not os.path.isabs(model_path):
+            model_path = os.path.join(pkg_dir, 'models', model_path)
 
         self.get_logger().info(f'Loading YOLO model from: {model_path}')
         self.model = YOLO(model_path)
+        self._warn_if_model_has_no_target_roles()
 
         self.get_logger().info('YOLO Detector Node Started')
+
+    @staticmethod
+    def _normalize_label(label: str) -> str:
+        return str(label).strip().lower().replace('_', ' ').replace('-', ' ')
+
+    def _warn_if_model_has_no_target_roles(self) -> None:
+        names = self.model.names
+        if isinstance(names, dict):
+            model_labels = {self._normalize_label(v) for v in names.values()}
+        else:
+            model_labels = {self._normalize_label(v) for v in names}
+
+        all_aliases = set()
+        for aliases in self.role_aliases.values():
+            all_aliases.update(aliases)
+
+        if model_labels.isdisjoint(all_aliases):
+            self.get_logger().warn(
+                'Loaded model has no target-role classes. '
+                'A generic model like yolov8n.pt only has "person". '
+                'Use a custom-trained model with labels military/researcher/student/worker.'
+            )
+
+    def _extract_label(self, names, cls_id: int) -> str:
+        if isinstance(names, dict):
+            return str(names.get(cls_id, cls_id))
+        if 0 <= cls_id < len(names):
+            return str(names[cls_id])
+        return str(cls_id)
+
+    def _map_label_to_role(self, label: str):
+        normalized = self._normalize_label(label)
+        for role, aliases in self.role_aliases.items():
+            if normalized in aliases:
+                return role
+        return None
 
     def image_callback(self, msg: Image) -> None:
         now = time.time()
@@ -80,26 +146,21 @@ class YOLODetector(Node):
             return 'empty'
 
         names = result.names
-        detected_labels = []
+        detected_roles = []
 
         for cls_id in boxes.cls.tolist():
             cls_id = int(cls_id)
-            label = names.get(cls_id, str(cls_id))
-            detected_labels.append(label.lower())
+            label = self._extract_label(names, cls_id)
+            role = self._map_label_to_role(label)
+            if role is not None:
+                detected_roles.append(role)
 
-        self.get_logger().info(f'Detected labels: {detected_labels}')
+        self.get_logger().info(f'Detected target roles: {detected_roles}')
 
-        # TODO: adjust these strings to your actual custom model class names.
-        authorized_labels = {'authorized', 'student', 'young_lady', 'young lady'}
-        intruder_labels = {'intruder', 'officer', 'military_officer', 'military officer'}
-
-        for label in detected_labels:
-            if label in intruder_labels:
-                return 'intruder'
-
-        for label in detected_labels:
-            if label in authorized_labels:
-                return 'authorized'
+        if any(role in detected_roles for role in ('military', 'worker')):
+            return 'intruder'
+        if any(role in detected_roles for role in ('researcher', 'student')):
+            return 'authorized'
 
         return 'empty'
 
