@@ -60,6 +60,7 @@ class YOLODetector(Node):
             for role, aliases in self.role_aliases.items()
             if role in self.target_roles
         }
+        self.stop_sign_aliases = {'stop sign', 'stopsign'}
 
         pkg_dir = get_package_share_directory('yolo_detector')
         model_path = model_file
@@ -146,16 +147,23 @@ class YOLODetector(Node):
             return 'empty'
 
         names = result.names
+        detected_labels = []
         detected_roles = []
 
         for cls_id in boxes.cls.tolist():
             cls_id = int(cls_id)
             label = self._extract_label(names, cls_id)
+            normalized_label = self._normalize_label(label)
+            detected_labels.append(normalized_label)
             role = self._map_label_to_role(label)
             if role is not None:
                 detected_roles.append(role)
 
+        self.get_logger().info(f'Detected labels: {detected_labels}')
         self.get_logger().info(f'Detected target roles: {detected_roles}')
+
+        if any(label in self.stop_sign_aliases for label in detected_labels):
+            return 'stop_sign'
 
         if any(role in detected_roles for role in ('military', 'worker')):
             return 'intruder'

@@ -7,6 +7,7 @@ from rclpy.action import ActionClient
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 from nav2_msgs.action import NavigateToPose
+from action_msgs.msg import GoalStatus
 
 
 class MissionNode(Node):
@@ -28,6 +29,10 @@ class MissionNode(Node):
         self.latest_vision_status = 'empty'
         self.inspection_timer = None
         self.detected_results = []
+        self.last_completed_location_id = None
+        self.current_goal_handle = None
+        self.pending_stop_directive = None
+        self.stop_sign_action_in_progress = False
 
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.marker_pub = self.create_publisher(MarkerArray, '/detected_markers', 10)
@@ -50,6 +55,65 @@ class MissionNode(Node):
         self.get_logger().info(
             f"vision_callback: {self.latest_vision_status}"
         )
+        if self.latest_vision_status == 'stop_sign':
+            self.handle_stop_sign_event()
+
+    def find_location_index_by_id(self, location_id: int):
+        for idx, location in enumerate(self.candidate_locations):
+            if location['id'] == location_id:
+                return idx
+        return None
+
+    def handle_stop_sign_event(self) -> None:
+        if self.current_index >= len(self.candidate_locations):
+            return
+
+        current_target_id = self.candidate_locations[self.current_index]['id']
+
+        if self.last_completed_location_id == 1 and current_target_id == 2:
+            self.request_stop_sign_directive('skip_to_5')
+        elif self.last_completed_location_id == 5 and current_target_id == 6:
+            self.request_stop_sign_directive('finish_mission')
+
+    def request_stop_sign_directive(self, directive: str) -> None:
+        if self.pending_stop_directive == directive:
+            return
+
+        self.pending_stop_directive = directive
+        self.get_logger().warn(f'Stop sign detected. Pending directive: {directive}')
+
+        if self.current_goal_handle is not None and not self.stop_sign_action_in_progress:
+            self.cancel_current_goal_for_stop_sign()
+
+    def cancel_current_goal_for_stop_sign(self) -> None:
+        if self.current_goal_handle is None or self.stop_sign_action_in_progress:
+            return
+
+        self.stop_sign_action_in_progress = True
+        cancel_future = self.current_goal_handle.cancel_goal_async()
+        cancel_future.add_done_callback(self.stop_sign_cancel_done_callback)
+
+    def stop_sign_cancel_done_callback(self, _future) -> None:
+        self.stop_sign_action_in_progress = False
+        directive = self.pending_stop_directive
+        self.pending_stop_directive = None
+        self.current_goal_handle = None
+
+        if directive == 'skip_to_5':
+            idx = self.find_location_index_by_id(5)
+            if idx is None:
+                self.get_logger().error('Location id=5 not found. Ending mission.')
+                self.current_index = len(self.candidate_locations)
+                self.go_to_next_location()
+                return
+
+            self.current_index = idx
+            self.get_logger().warn('Stop sign between 1->2. Skipping ids 2,3,4 and rerouting to id=5.')
+            self.go_to_next_location()
+        elif directive == 'finish_mission':
+            self.get_logger().warn('Stop sign between 5->6. Finishing mission immediately.')
+            self.current_index = len(self.candidate_locations)
+            self.go_to_next_location()
 
     def go_to_next_location(self) -> None:
         if self.current_index >= len(self.candidate_locations):
@@ -89,12 +153,30 @@ class MissionNode(Node):
             self.go_to_next_location()
             return
 
+        self.current_goal_handle = goal_handle
         self.get_logger().info('Goal accepted.')
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(self.goal_result_callback)
 
+        if self.pending_stop_directive is not None and not self.stop_sign_action_in_progress:
+            self.cancel_current_goal_for_stop_sign()
+
     def goal_result_callback(self, future):
-        _result = future.result().result
+        result_wrapper = future.result()
+        status_code = result_wrapper.status
+        self.current_goal_handle = None
+
+        if status_code == GoalStatus.STATUS_CANCELED:
+            self.get_logger().info('Navigation goal canceled after stop-sign detection.')
+            return
+
+        if status_code != GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().warn('Navigation did not succeed. Recording empty result and continuing.')
+            self.record_result('empty')
+            self.current_index += 1
+            self.go_to_next_location()
+            return
+
         self.get_logger().info('Goal reached. Waiting briefly before inspection...')
 
         if self.inspection_timer is not None:
@@ -118,6 +200,7 @@ class MissionNode(Node):
         )
 
         self.record_result(status)
+        self.last_completed_location_id = location['id']
         self.publish_all_markers()
 
         self.current_index += 1
