@@ -34,10 +34,10 @@ class YOLODetector(Node):
         self.detection_interval = 1.0 / rate_limit
         self.last_detection_time = 0.0
 
-        self.declare_parameter('model_file', 'yolov8n.pt')
+        self.declare_parameter('model_file', 'best.pt')
         model_file = self.get_parameter('model_file').get_parameter_value().string_value
         if not model_file:
-            model_file = 'yolov8n.pt'
+            model_file = 'best.pt'
 
         self.declare_parameter('target_roles', ['military', 'researcher', 'student', 'worker'])
         configured_roles = [

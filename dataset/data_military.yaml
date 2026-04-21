@@ -1,0 +1,6 @@
+path: /Users/maksimandpreeti/Desktop/Maksim/Robotics-Projects/ROS2_Challenge_SUTD_Term_2/dataset
+train: images/train
+val: images/val
+
+names:
+  0: military
