@@ -31,6 +31,9 @@ class MissionNode(Node):
         self.latest_vision_status = 'empty'
         self.inspection_timer = None
         self.detected_results = []
+        self.max_detected_people = 4
+        self.base_location_id = 9
+        self.return_to_base_triggered = False
         self.last_completed_location_id = None
         self.current_goal_handle = None
         self.pending_stop_directive = None
@@ -70,6 +73,38 @@ class MissionNode(Node):
             if location['id'] == location_id:
                 return idx
         return None
+
+    def count_detected_people(self) -> int:
+        return sum(
+            1 for item in self.detected_results
+            if item['status'] in ('authorized', 'intruder')
+        )
+
+    def maybe_return_to_base(self) -> bool:
+        if self.return_to_base_triggered:
+            return False
+
+        detected_people = self.count_detected_people()
+        if detected_people < self.max_detected_people:
+            return False
+
+        base_index = self.find_location_index_by_id(self.base_location_id)
+        if base_index is None:
+            self.get_logger().error(f'Base waypoint id={self.base_location_id} not found.')
+            return False
+
+        if self.current_index < len(self.candidate_locations):
+            next_id = self.candidate_locations[self.current_index]['id']
+            if next_id == self.base_location_id:
+                return False
+
+        self.return_to_base_triggered = True
+        self.current_index = base_index
+        self.get_logger().warn(
+            f'Detected people reached {detected_people}/{self.max_detected_people}. '
+            f'Skipping remaining waypoints and returning to base id={self.base_location_id}.'
+        )
+        return True
 
     def handle_stop_sign_event(self) -> None:
         if self.current_index >= len(self.candidate_locations):
@@ -231,6 +266,7 @@ class MissionNode(Node):
         self.publish_all_markers()
 
         self.current_index += 1
+        self.maybe_return_to_base()
         self.go_to_next_location()
 
     def record_result(self, status: str) -> None:
