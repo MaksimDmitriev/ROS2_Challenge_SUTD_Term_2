@@ -19,10 +19,10 @@ except ImportError:
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 DEFAULT_PROMPT = (
     "Classify this single scene image for security. "
-    "Rules: military or worker => intruder. "
-    "Student or researcher or lab assistant => authorized. "
-    "If no relevant person is visible => empty. "
-    "If a stop sign is clearly visible => stop_sign. "
+    "Printed photos/posters/cutouts of people count as valid people; do not label empty just because the person is on paper. "
+    "Class rules: military or worker => intruder. Student or researcher or lab assistant => authorized. "
+    "Researcher cues include lab coat, white coat, clipboard, tablet, or scientist-like attire, even if small or partially visible. "
+    "If a stop sign is clearly visible anywhere, return stop_sign. "
     "Return exactly one token: intruder, authorized, empty, or stop_sign."
 )
 VALID_STATUSES = {"intruder", "authorized", "empty", "stop_sign"}
