@@ -17,14 +17,16 @@ class MissionNode(Node):
 
         self.candidate_locations = [
             {"id": 1, "x": 1.230, "y": 0.203, "z": 0.018325, "w": 0.999832},
-            {"id": 2, "x": 2.272017240524292, "y": -0.3983581066131592, "z": -0.7151382830534804, "w": 0.6989830013035511},
-            {"id": 3, "x": 2.293062448501587, "y": -0.29181909561157227, "z": 0.745175003291093, "w": 0.6668689634929186},
-            {"id": 4, "x": 2.168145179748535, "y": -0.15960049629211426, "z": -0.01837860941291974, "w": 0.9998310990942657},
-            {"id": 5, "x": 1.087, "y": -1.942, "z": -0.693018, "w": 0.720920},
-            {"id": 6, "x": 2.438, "y": -1.839, "z": 0.749281, "w": 0.662253},
-            {"id": 7, "x": 2.492, "y": -1.800, "z": 0.042288, "w": 0.999105},
-            {"id": 8, "x": 2.438, "y": -1.816, "z": -0.683622, "w": 0.729836},
-            {"id": 9, "x": 0.017, "y": 0.066, "z": 0.004746, "w": 0.999989},
+            {"id": 2, "x": 1.1780259609222412, "y": -0.2994805574417114, "z": 0.039863363147714895, "w": 0.9992051402382562},  # 1st stop sign
+            {"id": 3, "x": 2.272017240524292, "y": -0.3983581066131592, "z": -0.7151382830534804, "w": 0.6989830013035511},
+            {"id": 4, "x": 2.293062448501587, "y": -0.29181909561157227, "z": 0.745175003291093, "w": 0.6668689634929186},
+            {"id": 5, "x": 2.168145179748535, "y": -0.15960049629211426, "z": -0.01837860941291974, "w": 0.9998310990942657},
+            {"id": 6, "x": 1.087, "y": -1.942, "z": -0.693018, "w": 0.720920},
+            {"id": 7, "x": 1.475852370262146, "y": -2.1543092727661133, "z": 0.033015992097299496, "w": 0.9994548235242207},  # 2nd stop sign
+            {"id": 8, "x": 2.438, "y": -1.839, "z": 0.749281, "w": 0.662253},
+            {"id": 9, "x": 2.492, "y": -1.800, "z": 0.042288, "w": 0.999105},
+            {"id": 10, "x": 2.438, "y": -1.816, "z": -0.683622, "w": 0.729836},
+            {"id": 11, "x": 0.017, "y": 0.066, "z": 0.004746, "w": 0.999989},
         ]
         
         self.current_index = 0
@@ -32,7 +34,7 @@ class MissionNode(Node):
         self.inspection_timer = None
         self.detected_results = []
         self.max_detected_people = 99
-        self.base_location_id = 9
+        self.base_location_id = 11
         self.return_to_base_triggered = False
         self.last_completed_location_id = None
         self.current_goal_handle = None
@@ -112,10 +114,10 @@ class MissionNode(Node):
 
         current_target_id = self.candidate_locations[self.current_index]['id']
 
-        if self.last_completed_location_id == 1 and current_target_id == 2:
-            self.request_stop_sign_directive('skip_to_5')
-        elif self.last_completed_location_id == 5 and current_target_id == 6:
-            self.request_stop_sign_directive('finish_mission')
+        if self.last_completed_location_id == 2 and current_target_id == 3:
+            self.request_stop_sign_directive('skip_to_6')
+        elif self.last_completed_location_id == 7 and current_target_id == 8:
+            self.request_stop_sign_directive('skip_to_11')
 
     def request_stop_sign_directive(self, directive: str) -> None:
         if self.pending_stop_directive == directive:
@@ -141,20 +143,27 @@ class MissionNode(Node):
         self.pending_stop_directive = None
         self.current_goal_handle = None
 
-        if directive == 'skip_to_5':
-            idx = self.find_location_index_by_id(5)
+        if directive == 'skip_to_6':
+            idx = self.find_location_index_by_id(6)
             if idx is None:
-                self.get_logger().error('Location id=5 not found. Ending mission.')
+                self.get_logger().error('Location id=6 not found. Ending mission.')
                 self.current_index = len(self.candidate_locations)
                 self.go_to_next_location()
                 return
 
             self.current_index = idx
-            self.get_logger().warn('Stop sign between 1->2. Skipping ids 2,3,4 and rerouting to id=5.')
+            self.get_logger().warn('Stop sign at id=2 path. Skipping ids 3,4,5 and rerouting to id=6.')
             self.go_to_next_location()
-        elif directive == 'finish_mission':
-            self.get_logger().warn('Stop sign between 5->6. Finishing mission immediately.')
-            self.current_index = len(self.candidate_locations)
+        elif directive == 'skip_to_11':
+            idx = self.find_location_index_by_id(11)
+            if idx is None:
+                self.get_logger().error('Location id=11 not found. Ending mission.')
+                self.current_index = len(self.candidate_locations)
+                self.go_to_next_location()
+                return
+
+            self.get_logger().warn('Stop sign at id=7 path. Skipping ids 8,9,10 and jumping to id=11.')
+            self.current_index = idx
             self.go_to_next_location()
 
     def go_to_next_location(self) -> None:
@@ -266,6 +275,17 @@ class MissionNode(Node):
         self.publish_all_markers()
 
         self.current_index += 1
+        if status == 'stop_sign':
+            if location['id'] == 2:
+                idx = self.find_location_index_by_id(6)
+                if idx is not None:
+                    self.get_logger().warn('Stop sign detected at id=2. Skipping ids 3,4,5.')
+                    self.current_index = idx
+            elif location['id'] == 7:
+                idx = self.find_location_index_by_id(11)
+                if idx is not None:
+                    self.get_logger().warn('Stop sign detected at id=7. Skipping ids 8,9,10 and moving to id=11.')
+                    self.current_index = idx
         self.maybe_return_to_base()
         self.go_to_next_location()
 
@@ -280,8 +300,15 @@ class MissionNode(Node):
 
     def publish_all_markers(self) -> None:
         marker_array = MarkerArray()
+        marker_id = 0
 
-        for i, item in enumerate(self.detected_results):
+        for item in self.detected_results:
+            if item['status'] == 'empty':
+                self.get_logger().info(
+                    f"[MARKER] id={item['id']} status=empty -> no marker published"
+                )
+                continue
+
             marker = Marker()
             marker.header.frame_id = 'map'
             self.get_logger().info(
@@ -289,7 +316,7 @@ class MissionNode(Node):
             )
             marker.header.stamp = self.get_clock().now().to_msg()
             marker.ns = 'detected_people'
-            marker.id = i
+            marker.id = marker_id
             marker.type = Marker.CYLINDER
             marker.action = Marker.ADD
 
@@ -304,26 +331,22 @@ class MissionNode(Node):
 
             if item['status'] == 'authorized':
                 marker.color.r = 0.0
-                marker.color.g = 0.0
-                marker.color.b = 1.0
+                marker.color.g = 1.0
+                marker.color.b = 0.0
                 marker.color.a = 1.0
             elif item['status'] == 'intruder':
                 marker.color.r = 1.0
                 marker.color.g = 0.0
                 marker.color.b = 0.0
                 marker.color.a = 1.0
-            else:
-                marker.color.r = 0.5
-                marker.color.g = 0.5
-                marker.color.b = 0.5
-                marker.color.a = 1.0
 
             marker_array.markers.append(marker)
+            marker_id += 1
             self.get_logger().info(
                 f"[MARKER] id={item['id']} "
                 f"status={item['status']} "
                 f"pos=({item['x']:.2f}, {item['y']:.2f}) "
-                f"color={'BLUE' if item['status']=='authorized' else 'RED' if item['status']=='intruder' else 'GRAY'}"
+                f"color={'GREEN' if item['status']=='authorized' else 'RED'}"
             )
 
 
