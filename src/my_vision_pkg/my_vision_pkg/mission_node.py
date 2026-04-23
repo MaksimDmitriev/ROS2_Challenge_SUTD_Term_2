@@ -16,7 +16,7 @@ class MissionNode(Node):
         super().__init__('mission_node')
 
         self.candidate_locations = [
-            {"id": 1, "x": 1.230, "y": 0.203, "z": 0.018325, "w": 0.999832},
+            {"id": 1, "x": 1.230, "y": 0.203, "z": 0.018325, "w": 0.999832}, # TODO: need to move closer
             {"id": 2, "x": 1.1780259609222412, "y": -0.2994805574417114, "z": 0.039863363147714895, "w": 0.9992051402382562},  # 1st stop sign
             {"id": 3, "x": 2.272017240524292, "y": -0.3983581066131592, "z": -0.7151382830534804, "w": 0.6989830013035511},
             {"id": 4, "x": 2.293062448501587, "y": -0.29181909561157227, "z": 0.745175003291093, "w": 0.6668689634929186},
@@ -265,6 +265,12 @@ class MissionNode(Node):
 
     def complete_inspection(self, status: str) -> None:
         location = self.candidate_locations[self.current_index]
+        if location['id'] in (2, 7) and status != 'stop_sign':
+            self.get_logger().info(
+                f"Checkpoint at id={location['id']}: no stop sign detected; ignoring person class ({status})."
+            )
+            status = 'empty'
+
         marker_status = status if status in ('authorized', 'intruder', 'empty') else 'empty'
         self.get_logger().info(
             f"Inspection at location {location['id']}: {marker_status}"
