@@ -184,12 +184,12 @@ class MissionNode(Node):
             self.go_to_next_location()
             return
 
-        self.get_logger().info('Goal reached. Waiting 1 second before single-frame inspection...')
+        self.get_logger().info('Goal reached. Waiting 5 seconds before single-frame inspection...')
 
         if self.inspection_timer is not None:
             self.inspection_timer.cancel()
 
-        self.inspection_timer = self.create_timer(1.0, self.inspect_current_location_once)
+        self.inspection_timer = self.create_timer(5.0, self.inspect_current_location_once)
 
     def inspect_current_location_once(self):
         if self.inspection_timer is not None:

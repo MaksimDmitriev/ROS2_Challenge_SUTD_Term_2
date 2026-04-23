@@ -21,6 +21,8 @@ class GPTVisionNode(Node):
 
         self.bridge = CvBridge()
         self.latest_frame_rgb = None
+        self.latest_frame_stamp = None
+        self.request_counter = 0
 
         self.publisher_status = self.create_publisher(String, '/vision_status', 10)
         self.subscriber = self.create_subscription(
@@ -36,6 +38,8 @@ class GPTVisionNode(Node):
         )
 
         self.declare_parameter('openai_model', 'gpt-4.1-mini')
+        self.declare_parameter('save_debug_images', True)
+        self.declare_parameter('debug_image_dir', '/tmp/gpt_vision_requests')
         self.declare_parameter(
             'openai_prompt',
             (
@@ -49,6 +53,8 @@ class GPTVisionNode(Node):
         )
 
         self.openai_model = self.get_parameter('openai_model').get_parameter_value().string_value
+        self.save_debug_images = self.get_parameter('save_debug_images').get_parameter_value().bool_value
+        self.debug_image_dir = self.get_parameter('debug_image_dir').get_parameter_value().string_value
         self.openai_prompt = self.get_parameter('openai_prompt').get_parameter_value().string_value
 
         self.openai_client = None
@@ -66,6 +72,7 @@ class GPTVisionNode(Node):
     def image_callback(self, msg: Image) -> None:
         try:
             self.latest_frame_rgb = self.bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
+            self.latest_frame_stamp = msg.header.stamp
         except Exception as e:
             self.get_logger().error(f'Failed to cache image frame: {e}')
 
@@ -80,6 +87,18 @@ class GPTVisionNode(Node):
             response.success = False
             response.message = 'empty'
             return response
+
+        self.request_counter += 1
+        stamp = self.latest_frame_stamp
+        stamp_text = (
+            f'{stamp.sec}.{stamp.nanosec:09d}'
+            if stamp is not None else 'unknown'
+        )
+        image_path = self.save_debug_image(self.latest_frame_rgb, stamp_text)
+        self.get_logger().info(
+            f'Sending frame to OpenAI: request_id={self.request_counter}, '
+            f'stamp={stamp_text}, saved_image={image_path}'
+        )
 
         try:
             status = self.classify_with_openai(self.latest_frame_rgb)
@@ -98,6 +117,20 @@ class GPTVisionNode(Node):
         response.message = status
         self.get_logger().info(f'Vision status: {status}')
         return response
+
+    def save_debug_image(self, frame_rgb, stamp_text: str) -> str:
+        if not self.save_debug_images:
+            return 'disabled'
+
+        try:
+            os.makedirs(self.debug_image_dir, exist_ok=True)
+            filename = f'req_{self.request_counter:05d}_{stamp_text.replace(".", "_")}.jpg'
+            output_path = os.path.join(self.debug_image_dir, filename)
+            cv2.imwrite(output_path, cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
+            return output_path
+        except Exception as e:
+            self.get_logger().warn(f'Failed to save debug image: {e}')
+            return 'save_failed'
 
     def classify_with_openai(self, frame_rgb) -> str:
         ok, encoded = cv2.imencode('.jpg', cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))

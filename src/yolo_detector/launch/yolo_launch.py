@@ -10,7 +10,9 @@ def generate_launch_description():
             name='gpt_vision_node',
             output='screen',
             parameters=[
-                {'openai_model': 'gpt-4.1-mini'}
+                {'openai_model': 'gpt-4.1-mini'},
+                {'save_debug_images': True},
+                {'debug_image_dir': '/tmp/gpt_vision_requests'}
             ],
             remappings=[
                 ('/image_input_topic', '/camera/image_raw'),
