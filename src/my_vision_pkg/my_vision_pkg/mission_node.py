@@ -33,7 +33,7 @@ class MissionNode(Node):
         self.latest_vision_status = 'empty'
         self.inspection_timer = None
         self.detected_results = []
-        self.max_detected_people = 99
+        self.max_detected_people = 4
         self.base_location_id = 11
         self.return_to_base_triggered = False
         self.last_completed_location_id = None
