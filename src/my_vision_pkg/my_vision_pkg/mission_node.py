@@ -5,6 +5,8 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 
 from std_msgs.msg import String
+from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import PoseWithCovarianceStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from nav2_msgs.action import NavigateToPose
 from action_msgs.msg import GoalStatus
@@ -40,6 +42,12 @@ class MissionNode(Node):
         self.current_goal_handle = None
         self.pending_stop_directive = None
         self.stop_sign_action_in_progress = False
+        self.latest_scan = None
+        self.latest_pose = None
+        self.warned_missing_scan = False
+        self.warned_missing_pose = False
+        self.wall_scan_half_window_rad = math.radians(35.0)
+        self.marker_wall_offset_m = 0.10
 
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.marker_pub = self.create_publisher(MarkerArray, '/detected_markers', 10)
@@ -51,6 +59,18 @@ class MissionNode(Node):
             10
         )
         self.vision_client = self.create_client(Trigger, '/classify_current_frame')
+        self.scan_sub = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self.scan_callback,
+            10
+        )
+        self.pose_sub = self.create_subscription(
+            PoseWithCovarianceStamped,
+            '/amcl_pose',
+            self.pose_callback,
+            10
+        )
 
         self.get_logger().info('Waiting for navigate_to_pose action server...')
         self.nav_client.wait_for_server()
@@ -69,6 +89,12 @@ class MissionNode(Node):
         )
         if self.latest_vision_status == 'stop_sign' and self.current_goal_handle is not None:
             self.handle_stop_sign_event()
+
+    def scan_callback(self, msg: LaserScan) -> None:
+        self.latest_scan = msg
+
+    def pose_callback(self, msg: PoseWithCovarianceStamped) -> None:
+        self.latest_pose = msg.pose.pose
 
     def find_location_index_by_id(self, location_id: int):
         for idx, location in enumerate(self.candidate_locations):
@@ -272,11 +298,12 @@ class MissionNode(Node):
             status = 'empty'
 
         marker_status = status if status in ('authorized', 'intruder', 'empty') else 'empty'
+        marker_x, marker_y = self.estimate_marker_position(location, marker_status)
         self.get_logger().info(
             f"Inspection at location {location['id']}: {marker_status}"
         )
 
-        self.record_result(marker_status)
+        self.record_result(marker_status, marker_x, marker_y)
         self.last_completed_location_id = location['id']
         self.publish_all_markers()
 
@@ -295,14 +322,74 @@ class MissionNode(Node):
         self.maybe_return_to_base()
         self.go_to_next_location()
 
-    def record_result(self, status: str) -> None:
+    def record_result(self, status: str, marker_x: float = None, marker_y: float = None) -> None:
         location = self.candidate_locations[self.current_index]
+        if marker_x is None:
+            marker_x = location['x']
+        if marker_y is None:
+            marker_y = location['y']
         self.detected_results.append({
             'id': location['id'],
-            'x': location['x'],
-            'y': location['y'],
+            'x': marker_x,
+            'y': marker_y,
             'status': status
         })
+
+    @staticmethod
+    def quaternion_to_yaw(z: float, w: float) -> float:
+        # For planar robot orientation (x=y=0 quaternion components).
+        return math.atan2(2.0 * w * z, 1.0 - 2.0 * z * z)
+
+    def estimate_marker_position(self, location: dict, status: str) -> tuple[float, float]:
+        # Keep empty detections at waypoint/fallback; no marker is published for empty anyway.
+        if status not in ('authorized', 'intruder'):
+            return location['x'], location['y']
+
+        if self.latest_scan is None:
+            if not self.warned_missing_scan:
+                self.get_logger().warn('No /scan data yet; using waypoint position for marker.')
+                self.warned_missing_scan = True
+            return location['x'], location['y']
+
+        if self.latest_pose is None:
+            if not self.warned_missing_pose:
+                self.get_logger().warn('No /amcl_pose data yet; using waypoint position for marker.')
+                self.warned_missing_pose = True
+            return location['x'], location['y']
+
+        scan = self.latest_scan
+        best_range = None
+        best_angle = None
+        angle = scan.angle_min
+
+        for r in scan.ranges:
+            if abs(angle) <= self.wall_scan_half_window_rad:
+                if math.isfinite(r) and scan.range_min < r < scan.range_max:
+                    if best_range is None or r < best_range:
+                        best_range = r
+                        best_angle = angle
+            angle += scan.angle_increment
+
+        if best_range is None or best_angle is None:
+            self.get_logger().warn('No valid frontal LiDAR wall hit; using waypoint position for marker.')
+            return location['x'], location['y']
+
+        robot_x = self.latest_pose.position.x
+        robot_y = self.latest_pose.position.y
+        yaw = self.quaternion_to_yaw(self.latest_pose.orientation.z, self.latest_pose.orientation.w)
+        heading = yaw + best_angle
+        distance = max(best_range - self.marker_wall_offset_m, 0.15)
+
+        marker_x = robot_x + distance * math.cos(heading)
+        marker_y = robot_y + distance * math.sin(heading)
+
+        self.get_logger().info(
+            f"[MARKER] lidar-placement status={status} "
+            f"robot=({robot_x:.2f},{robot_y:.2f}) "
+            f"range={best_range:.2f} angle={best_angle:.2f} "
+            f"marker=({marker_x:.2f},{marker_y:.2f})"
+        )
+        return marker_x, marker_y
 
     def publish_all_markers(self) -> None:
         marker_array = MarkerArray()
