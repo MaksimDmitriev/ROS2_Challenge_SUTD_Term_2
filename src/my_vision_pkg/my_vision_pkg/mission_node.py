@@ -255,6 +255,16 @@ class MissionNode(Node):
             self.go_to_next_location()
             return
 
+        location = self.candidate_locations[self.current_index]
+        if location['id'] == self.base_location_id:
+            self.get_logger().info(
+                f"Reached base id={self.base_location_id}. Skipping inspection."
+            )
+            self.last_completed_location_id = location['id']
+            self.current_index += 1
+            self.go_to_next_location()
+            return
+
         self.get_logger().info('Goal reached. Waiting 2 seconds before single-frame inspection...')
 
         if self.inspection_timer is not None:
@@ -397,6 +407,12 @@ class MissionNode(Node):
         marker_id = 0
 
         for item in self.detected_results:
+            if item['id'] == self.base_location_id:
+                self.get_logger().info(
+                    f"[MARKER] id={item['id']} is base -> no marker published"
+                )
+                continue
+
             if item['status'] == 'empty':
                 self.get_logger().info(
                     f"[MARKER] id={item['id']} status=empty -> no marker published"
