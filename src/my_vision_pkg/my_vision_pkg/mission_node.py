@@ -3,6 +3,7 @@ import math
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+from rclpy.qos import qos_profile_sensor_data
 
 from std_msgs.msg import String
 from sensor_msgs.msg import LaserScan
@@ -63,7 +64,7 @@ class MissionNode(Node):
             LaserScan,
             '/scan',
             self.scan_callback,
-            10
+            qos_profile_sensor_data
         )
         self.pose_sub = self.create_subscription(
             PoseWithCovarianceStamped,
@@ -455,7 +456,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
