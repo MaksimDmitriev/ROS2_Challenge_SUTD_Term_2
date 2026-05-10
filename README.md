@@ -111,7 +111,7 @@ Optional monitor:
 ros2 topic echo /vision_status
 ```
 
-## Autonomous SLAM mapping (from PDF pages 5-7)
+## Autonomous SLAM mapping
 
 The autonomous SLAM procedure used in this project follows the sequence documented in the attached PDF.
 
